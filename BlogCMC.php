@@ -33,13 +33,13 @@
     }
         class comment {
         private int $id_comment ;
-        private string $description;
+        private string $content;
         private DateTime $dateC;
-        function __construct($id_comment,$description,$dateC)
+        function __construct($id_comment,$content,$dateC)
         {
             $this->id_comment = $id_comment;
 
-            $this->description = $description;
+            $this->content = $content;
             $this->dateC = $dateC;
         }
         

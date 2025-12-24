@@ -33,13 +33,12 @@
     }
         class comment {
         private int $id_comment ;
-        private string $libelle;
         private string $description;
         private DateTime $dateC;
-        function __construct($id_comment,$libelle,$description,$dateC)
+        function __construct($id_comment,$description,$dateC)
         {
             $this->id_comment = $id_comment;
-            $this->libelle = $libelle;
+
             $this->description = $description;
             $this->dateC = $dateC;
         }
@@ -73,7 +72,8 @@ class user {
     protected string $password;
     protected DateTime $createdAT; 
     protected DateTime $lastLogin;
-    function __construct($id_user , $username , $email , $password , $createdAT , $lastLogin){
+    function __construct($id_user , $username , $email , $password , $createdAT , $lastLogin)
+    {
         $this->id_user = $id_user;
         $this->username = $username;
         $this->email = $email;
@@ -81,15 +81,12 @@ class user {
         $this->createdAT = $createdAT;
         $this->lastLogin = $lastLogin;
     }
-    
-
     public function login($email , $password){
 
     }
     public function logout(){
 
     }
-
 }
 class moderateur extends user {
     public function approvComment($id_comment){
@@ -152,7 +149,4 @@ class author extends user {
     class editeur extends moderateur {
         private string $moderationLevel;
     }
-
-
-
 ?>

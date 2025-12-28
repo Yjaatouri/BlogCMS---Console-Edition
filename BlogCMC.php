@@ -15,7 +15,7 @@ abstract class User {
         protected int $id,
         protected string $username,
         protected string $password,
-        protected ?string $email = null,          // ← NEW: optional email
+        protected ?string $email = null,       
         protected string $role,
         protected DateTime $createdAt,
         protected ?DateTime $lastLogin = null
@@ -69,7 +69,7 @@ class Author extends User {
         string $username,
         string $password,
         ?string $email,
-        protected string $bio,                    // ← NEW: required bio for authors
+        protected string $bio,                    
         DateTime $createdAt,
         ?DateTime $lastLogin = null
     ) {
@@ -552,7 +552,7 @@ class BlogCMS {
     }
 
     private function changeUserRole(): void {
-        // ... (unchanged, but now shows email and bio)
+        
         echo "\n--- CHANGE USER ROLE ---\n";
         foreach (Storage::$users as $u) {
             $created = $u->getCreatedAt()->format('Y-m-d H:i:s');
@@ -562,9 +562,6 @@ class BlogCMS {
             $extra = ($u instanceof Editor) ? " | Level: {$u->getModeratorLevel()}" : '';
             echo "[{$u->getId()}] {$u->getUsername()} (current: {$u->getRole()})$email$bio$extra | Created: $created | Last login: $last\n";
         }
-
-        // ... rest unchanged
-        // (The rest of the method is the same as before)
     }
 
     private function listPublishedArticles(): void {
@@ -624,7 +621,7 @@ class BlogCMS {
         }
         echo "Password: ";
         $password = trim(fgets(STDIN));
-        echo "Email (optional): ";
+        echo "Email: ";
         $emailInput = trim(fgets(STDIN));
         $email = $emailInput === '' ? null : $emailInput;
         echo "Bio: ";
@@ -667,8 +664,6 @@ class BlogCMS {
         $this->currentUser = null;
         echo "Logged out successfully.\n";
     }
-
-    // ... (all other methods remain unchanged: createArticle, editArticle, publishArticle, addComment, manageCategories, etc.)
 
     private function createArticle(): void {
         echo "\n=== CREATE ARTICLE ===\n";
@@ -885,8 +880,6 @@ class BlogCMS {
     }
 }
 
-/* =======================
-   START APP
-======================= */
+
 $app = new BlogCMS();
 $app->run();

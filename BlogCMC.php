@@ -98,6 +98,9 @@ class Editor extends Moderator {
     }
 
     public function getModeratorLevel(): string { return $this->moderatorLevel; }
+    public function setModeratorLevel(string $level): void {
+        $this->moderatorLevel = $level;
+    }
 }
 
 class Admin extends Moderator {
@@ -353,7 +356,7 @@ class BlogCMS {
 
         if ($this->currentUser->canManageUsers()) {
             echo $next++ . ". Manage users\n";
-            echo $next++ . ". Change user role\n";
+            echo $next++ . ". Change user role / moderation level\n";
         }
 
         echo "0. Log out\n> ";
@@ -497,8 +500,8 @@ class BlogCMS {
     private function createUserViaAdmin(): void {
         echo "Username: "; $un = trim(fgets(STDIN));
         echo "Password: "; $pw = trim(fgets(STDIN));
-        echo "Email (optional): "; $email = trim(fgets(STDIN));
-        $email = $email === '' ? null : $email;
+        echo "Email: "; $email = trim(fgets(STDIN));
+        
         echo "Role (author/editor/admin): "; $role = strtolower(trim(fgets(STDIN)));
         $now = new DateTime();
 
@@ -552,16 +555,142 @@ class BlogCMS {
     }
 
     private function changeUserRole(): void {
-        
-        echo "\n--- CHANGE USER ROLE ---\n";
-        foreach (Storage::$users as $u) {
-            $created = $u->getCreatedAt()->format('Y-m-d H:i:s');
-            $last = $u->getLastLogin() ? $u->getLastLogin()->format('Y-m-d H:i:s') : 'Never';
-            $email = $u->getEmail() ? " | Email: {$u->getEmail()}" : '';
-            $bio = ($u instanceof Author) ? " | Bio: {$u->getBio()}" : '';
-            $extra = ($u instanceof Editor) ? " | Level: {$u->getModeratorLevel()}" : '';
-            echo "[{$u->getId()}] {$u->getUsername()} (current: {$u->getRole()})$email$bio$extra | Created: $created | Last login: $last\n";
+        while (true) {
+            echo "\n--- CHANGE USER ROLE / MODERATION LEVEL ---\n";
+            foreach (Storage::$users as $u) {
+                $email = $u->getEmail() ? " | Email: {$u->getEmail()}" : '';
+                $bio = ($u instanceof Author) ? " | Bio: {$u->getBio()}" : '';
+                $extra = ($u instanceof Editor) ? " | Level: {$u->getModeratorLevel()}" : '';
+                echo "[{$u->getId()}] {$u->getUsername()} (current: {$u->getRole()})$email$bio$extra\n";
+            }
+
+            echo "\n1. Change user role\n";
+            echo "2. Change editor moderation level\n";
+            echo "0. Back to main menu\n> ";
+            $choice = trim(fgets(STDIN));
+
+            if ($choice === '0') {
+                break;
+            }
+
+            if ($choice === '1') {
+                $this->adminChangeUserRole();
+            } elseif ($choice === '2') {
+                $this->adminChangeEditorLevel();
+            } else {
+                echo "Invalid option.\n";
+            }
         }
+    }
+
+    private function adminChangeUserRole(): void {
+        echo "User ID to change role: ";
+        $userIdInput = trim(fgets(STDIN));
+        if ($userIdInput === '') {
+            echo "Cancelled.\n";
+            return;
+        }
+        $userId = (int)$userIdInput;
+
+        $targetUser = null;
+        $targetIndex = null;
+        foreach (Storage::$users as $i => $u) {
+            if ($u->getId() === $userId) {
+                $targetUser = $u;
+                $targetIndex = $i;
+                break;
+            }
+        }
+
+        if (!$targetUser) {
+            echo "User not found.\n";
+            return;
+        }
+
+        if ($targetUser->getId() === $this->currentUser->getId()) {
+            echo "You cannot change your own role.\n";
+            return;
+        }
+
+        echo "Current role: {$targetUser->getRole()}\n";
+        echo "New role (author/editor/admin): ";
+        $newRole = strtolower(trim(fgets(STDIN)));
+
+        $now = new DateTime();
+        $newUser = null;
+
+        if ($newRole === 'author') {
+            $bio = $targetUser instanceof Author ? $targetUser->getBio() : 'Promoted to author.';
+            $newUser = new Author(
+                $targetUser->getId(),
+                $targetUser->getUsername(),
+                 // password not exposed
+                $targetUser->getEmail(),
+                $bio,
+                $targetUser->getCreatedAt(),
+                $targetUser->getLastLogin()
+            );
+        } elseif ($newRole === 'editor') {
+            $level = $targetUser instanceof Editor ? $targetUser->getModeratorLevel() : 'junior';
+            $newUser = new Editor(
+                $targetUser->getId(),
+                $targetUser->getUsername(),
+                '',
+                $targetUser->getEmail(),
+                $level,
+                $targetUser->getCreatedAt(),
+                $targetUser->getLastLogin()
+            );
+        } elseif ($newRole === 'admin') {
+            $newUser = new Admin(
+                $targetUser->getId(),
+                $targetUser->getUsername(),
+                '',
+                $targetUser->getEmail(),
+                $targetUser->getCreatedAt(),
+                $targetUser->getLastLogin()
+            );
+        } else {
+            echo "Invalid role.\n";
+            return;
+        }
+
+        Storage::$users[$targetIndex] = $newUser;
+        echo "User {$targetUser->getUsername()} role changed to '{$newRole}'.\n";
+    }
+
+    private function adminChangeEditorLevel(): void {
+        echo "Editor user ID: ";
+        $userIdInput = trim(fgets(STDIN));
+        if ($userIdInput === '') {
+            echo "Cancelled.\n";
+            return;
+        }
+        $userId = (int)$userIdInput;
+
+        $targetUser = null;
+        foreach (Storage::$users as $u) {
+            if ($u->getId() === $userId && $u instanceof Editor) {
+                $targetUser = $u;
+                break;
+            }
+        }
+
+        if (!$targetUser) {
+            echo "Editor user not found.\n";
+            return;
+        }
+
+        echo "Current level: {$targetUser->getModeratorLevel()}\n";
+        echo "New moderation level (e.g., junior, senior, lead): ";
+        $newLevel = trim(fgets(STDIN));
+        if ($newLevel === '') {
+            echo "Cancelled.\n";
+            return;
+        }
+
+        $targetUser->setModeratorLevel($newLevel);
+        echo "Moderation level for {$targetUser->getUsername()} changed to '{$newLevel}'.\n";
     }
 
     private function listPublishedArticles(): void {
@@ -866,7 +995,7 @@ class BlogCMS {
                 $descPreview = strlen($cat->getDescription()) > 50 
                     ? substr($cat->getDescription(), 0, 47) . '...' 
                     : $cat->getDescription();
-                echo str_repeat("  ", $level) . "└─ [{$cat->getId()}] {$cat->getName()} — {$descPreview} (created: $created)\n";
+                echo str_repeat("  ", $level) . "└─ : [{$cat->getId()}] {$cat->getName()} — {$descPreview} (created: $created)\n";
                 $this->listCategoriesTree($cat->getId(), $level + 1);
             }
         }
@@ -879,7 +1008,6 @@ class BlogCMS {
         return null;
     }
 }
-
 
 $app = new BlogCMS();
 $app->run();

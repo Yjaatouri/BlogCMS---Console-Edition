@@ -1,4 +1,5 @@
 <?php
+
 class Storage {
     public static array $users = [];
     public static array $articles = [];
@@ -13,7 +14,7 @@ abstract class User {
     public function __construct(
         protected int $id,
         protected string $username,
-        protected string $password, 
+        protected string $password,
         protected string $role,
         protected DateTime $createdAt,
         protected ?DateTime $lastLogin = null
@@ -24,13 +25,10 @@ abstract class User {
     public function getRole(): string { return $this->role; }
     public function getCreatedAt(): DateTime { return $this->createdAt; }
     public function getLastLogin(): ?DateTime { return $this->lastLogin; }
-
-    public function setLastLogin(DateTime $date): void {
-        $this->lastLogin = $date;
-    }
+    public function setLastLogin(DateTime $date): void { $this->lastLogin = $date; }
 
     public function verifyPassword(string $password): bool {
-        return $this->password === $password; 
+        return $this->password === $password;
     }
 
     public function canCreateArticle(): bool { return false; }
@@ -75,11 +73,11 @@ class Author extends User {
 
 class Editor extends Moderator {
     public function __construct(
-        int $id, 
-        string $username, 
-        string $password, 
+        int $id,
+        string $username,
+        string $password,
         protected string $moderatorLevel,
-        DateTime $createdAt, 
+        DateTime $createdAt,
         ?DateTime $lastLogin = null
     ) {
         parent::__construct($id, $username, $password, 'editor', $createdAt, $lastLogin);
@@ -129,7 +127,7 @@ class Comment {
 
     public function display(): void {
         $status = $this->approved ? '[Approved]' : '[Pending]';
-        echo "   - {$status} {$this->author->getUsername()}: {$this->content}\n";
+        echo " - {$status} {$this->author->getUsername()}: {$this->content}\n";
     }
 }
 
@@ -147,18 +145,18 @@ class Article {
         private ?DateTime $updatedAt = null,
         private ?DateTime $publishedAt = null
     ) {
-        $this->updatedAt = $updatedAt ?? $createdAt; // initially same as created
+        $this->updatedAt = $updatedAt ?? $createdAt;
     }
 
     public function getId(): int { return $this->id; }
     public function getTitle(): string { return $this->title; }
-    public function setTitle(string $title): void { 
-        $this->title = $title; 
+    public function setTitle(string $title): void {
+        $this->title = $title;
         $this->touchUpdatedAt();
     }
     public function getContent(): string { return $this->content; }
-    public function setContent(string $content): void { 
-        $this->content = $content; 
+    public function setContent(string $content): void {
+        $this->content = $content;
         $this->touchUpdatedAt();
     }
     public function getAuthor(): User { return $this->author; }
@@ -178,7 +176,6 @@ class Article {
     public function addCategory(Category $c): void {
         $this->categories[$c->getId()] = $c;
     }
-
     public function getCategories(): array { return array_values($this->categories); }
 
     public function publish(): bool {
@@ -187,7 +184,7 @@ class Article {
         }
         $this->status = 'published';
         $this->publishedAt = new DateTime();
-        $this->touchUpdatedAt(); // publishing counts as update
+        $this->touchUpdatedAt();
         return true;
     }
 
@@ -198,9 +195,7 @@ class Article {
     public function addComment(Comment $c): void {
         $this->comments[] = $c;
     }
-
     public function getComments(): array { return $this->comments; }
-
     public function getApprovedComments(): array {
         return array_filter($this->comments, fn($c) => $c->isApproved());
     }
@@ -209,13 +204,12 @@ class Article {
         $catNames = array_map(fn($c) => $c->getName(), $this->getCategories());
         $cats = $catNames ? implode(', ', $catNames) : 'Aucune';
         $status = $this->isPublished() ? 'published' : 'draft';
-
         $created = $this->createdAt->format('Y-m-d H:i');
         $updated = $this->getUpdatedAt()->format('Y-m-d H:i');
         $published = $this->publishedAt ? $this->publishedAt->format('Y-m-d H:i') : '—';
 
         echo "[{$this->id}] {$this->title} ($status) by {$this->author->getUsername()} | Cats: {$cats}\n";
-        echo "     Created: $created | Updated: $updated | Published: $published\n";
+        echo " Created: $created | Updated: $updated | Published: $published\n";
 
         if ($full && $this->isPublished()) {
             echo str_repeat("-", 70) . "\n";
@@ -223,14 +217,14 @@ class Article {
             echo str_repeat("-", 70) . "\n";
             echo "Commentaires:\n";
             if (empty($this->getApprovedComments())) {
-                echo "   Aucun commentaire approuvé.\n";
+                echo " Aucun commentaire approuvé.\n";
             } else {
                 foreach ($this->getApprovedComments() as $comment) {
                     $comment->display();
                 }
             }
         } elseif ($full) {
-            echo "   (Article non publié - contenu visible uniquement pour les membres)\n";
+            echo " (Article non publié - contenu visible uniquement pour les membres)\n";
         }
     }
 }
@@ -295,32 +289,41 @@ class BlogCMS {
         $role = $this->currentUser->getRole();
         $username = $this->currentUser->getUsername();
         echo "\n=== BLOGCMS MENU ($role: $username) ===\n";
+
         echo "1. View all articles (incl. drafts)\n";
-        echo "2. View full article\n";
+
+        // New: My articles for authors/editors/admins
+        if ($this->currentUser->canCreateArticle()) {
+            echo "2. My articles\n";
+        }
+
+        $next = $this->currentUser->canCreateArticle() ? 3 : 2;
+
+        echo $next++ . ". View full article\n";
 
         if ($this->currentUser->canCreateArticle()) {
-            echo "3. Create article\n";
-            echo "4. Edit article\n";
-            echo "5. Publish article\n";
+            echo $next++ . ". Create article\n";
+            echo $next++ . ". Edit article\n";
+            echo $next++ . ". Publish article\n";
         }
 
         if ($this->currentUser->canAddComment()) {
-            echo "6. Add comment (on published articles)\n";
+            echo $next++ . ". Add comment (on published articles)\n";
         }
 
         if ($this->currentUser->canApproveComments()) {
-            echo "7. Approve comments\n";
+            echo $next++ . ". Approve comments\n";
         }
 
         if ($this->currentUser->canManageCategories()) {
-            echo "8. Manage categories\n";
+            echo $next++ . ". Manage categories\n";
         }
 
-        echo "9. Delete article\n";
+        echo $next++ . ". Delete article\n";
 
         if ($this->currentUser->canManageUsers()) {
-            echo "10. Manage users\n";
-            echo "11. Change user role\n";
+            echo $next++ . ". Manage users\n";
+            echo $next++ . ". Change user role\n";
         }
 
         echo "0. Log out\n> ";
@@ -332,14 +335,22 @@ class BlogCMS {
             '2' => $this->viewArticleAsVisitor(),
             '3' => $this->signup(),
             '4' => $this->login(),
-            '0' => exit("Goodbye! \n"),
+            '0' => exit("Goodbye!\n"),
+            default => $this->invalid(),
         };
     }
 
     private function handleAuthenticatedChoice(string $choice): void {
-        $canApprove = $this->currentUser->canApproveComments();
-        $canManageCats = $this->currentUser->canManageCategories();
-        $canManageUsers = $this->currentUser->canManageUsers();
+        // Special handling for the shifted "My articles" option
+        if ($choice === '2' && $this->currentUser->canCreateArticle()) {
+            $this->listMyArticles();
+            return;
+        }
+
+        // Adjust choice number if user has "My articles" option
+        if ($this->currentUser->canCreateArticle() && (int)$choice >= 3) {
+            $choice = (string)((int)$choice - 1);
+        }
 
         match ($choice) {
             '1' => $this->listArticles(),
@@ -348,17 +359,33 @@ class BlogCMS {
             '4' => $this->currentUser->canCreateArticle() ? $this->editArticle() : $this->invalid(),
             '5' => $this->currentUser->canCreateArticle() ? $this->publishArticle() : $this->invalid(),
             '6' => $this->currentUser->canAddComment() ? $this->addComment() : $this->invalid(),
-            '7' => $canApprove ? $this->approveComments() : $this->invalid(),
-            '8' => $canManageCats ? $this->manageCategories() : $this->invalid(),
+            '7' => $this->currentUser->canApproveComments() ? $this->approveComments() : $this->invalid(),
+            '8' => $this->currentUser->canManageCategories() ? $this->manageCategories() : $this->invalid(),
             '9' => $this->deleteArticle(),
-            '10' => $canManageUsers ? $this->manageUsers() : $this->invalid(),
-            '11' => $canManageUsers ? $this->changeUserRole() : $this->invalid(),
+            '10' => $this->currentUser->canManageUsers() ? $this->manageUsers() : $this->invalid(),
+            '11' => $this->currentUser->canManageUsers() ? $this->changeUserRole() : $this->invalid(),
             '0' => $this->logout(),
+            default => $this->invalid(),
         };
     }
 
     private function invalid(): void {
         echo "Invalid option or insufficient permissions.\n";
+    }
+
+    // NEW METHOD: List only articles owned by the current user
+    private function listMyArticles(): void {
+        $myArticles = array_filter(Storage::$articles, fn($a) => $a->isOwnedBy($this->currentUser));
+
+        if (empty($myArticles)) {
+            echo "\nYou haven't written any articles yet.\n";
+            return;
+        }
+
+        echo "\n=== MY ARTICLES ===\n";
+        foreach ($myArticles as $article) {
+            $article->display();
+        }
     }
 
     private function approveComments(): void {
@@ -398,13 +425,14 @@ class BlogCMS {
         echo "Article ID to delete: ";
         $id = (int)trim(fgets(STDIN));
         $article = $this->findArticle($id);
+
         if (!$article) {
             echo "Article not found.\n";
             return;
         }
 
         if (!$this->currentUser->canDeleteArticle($article)) {
-            echo "Permission denied. You can only delete your own articles.\n";
+            echo "Permission denied. You can only delete your own articles (or any if moderator/admin).\n";
             return;
         }
 
@@ -432,12 +460,8 @@ class BlogCMS {
             echo "0. Back\n> ";
             $ch = trim(fgets(STDIN));
             if ($ch === '0') break;
-
-            if ($ch === '1') {
-                $this->createUserViaAdmin();
-            } elseif ($ch === '2') {
-                $this->deleteUser();
-            }
+            if ($ch === '1') $this->createUserViaAdmin();
+            elseif ($ch === '2') $this->deleteUser();
         }
     }
 
@@ -445,8 +469,8 @@ class BlogCMS {
         echo "Username: "; $un = trim(fgets(STDIN));
         echo "Password: "; $pw = trim(fgets(STDIN));
         echo "Role (author/editor/admin): "; $role = strtolower(trim(fgets(STDIN)));
-
         $now = new DateTime();
+
         if ($role === 'editor') {
             echo "Moderator level (e.g., junior/senior): ";
             $level = trim(fgets(STDIN));
@@ -465,7 +489,6 @@ class BlogCMS {
     private function deleteUser(): void {
         echo "User ID to delete: ";
         $userId = (int)trim(fgets(STDIN));
-
         $targetIndex = null;
         foreach (Storage::$users as $i => $u) {
             if ($u->getId() === $userId) {
@@ -484,7 +507,6 @@ class BlogCMS {
         }
 
         $targetUser = Storage::$users[$targetIndex];
-
         if ($targetUser instanceof Author) {
             Storage::$articles = array_filter(Storage::$articles, fn($a) => !$a->isOwnedBy($targetUser));
             Storage::$articles = array_values(Storage::$articles);
@@ -507,7 +529,6 @@ class BlogCMS {
 
         echo "\nUser ID to modify: ";
         $userId = (int)trim(fgets(STDIN));
-
         $targetIndex = null;
         foreach (Storage::$users as $i => $u) {
             if ($u->getId() === $userId) {
@@ -528,17 +549,14 @@ class BlogCMS {
 
         echo "New role (author/editor/admin): ";
         $newRole = strtolower(trim(fgets(STDIN)));
-
         echo "Password for this user: ";
         $password = trim(fgets(STDIN));
 
         $oldUser = Storage::$users[$targetIndex];
-
         $newUser = match ($newRole) {
             'author' => new Author($oldUser->getId(), $oldUser->getUsername(), $password, $oldUser->getCreatedAt(), $oldUser->getLastLogin()),
             'admin' => new Admin($oldUser->getId(), $oldUser->getUsername(), $password, $oldUser->getCreatedAt(), $oldUser->getLastLogin()),
-            'editor' => null,
-            default => null
+            default => null,
         };
 
         if ($newRole === 'editor') {
@@ -605,17 +623,14 @@ class BlogCMS {
         echo "\n=== SIGN UP ===\n";
         echo "Username: ";
         $username = trim(fgets(STDIN));
-
         foreach (Storage::$users as $user) {
             if ($user->getUsername() === $username) {
                 echo "Username already taken.\n";
                 return;
             }
         }
-
         echo "Password: ";
         $password = trim(fgets(STDIN));
-
         $now = new DateTime();
         Storage::$users[] = new Author(
             Storage::$nextUserId++,
@@ -631,7 +646,6 @@ class BlogCMS {
         $u = trim(fgets(STDIN));
         echo "Password: ";
         $p = trim(fgets(STDIN));
-
         $now = new DateTime();
         foreach (Storage::$users as $user) {
             if ($user->getUsername() === $u && $user->verifyPassword($p)) {
@@ -661,7 +675,6 @@ class BlogCMS {
             if (trim($line) === "END") break;
             $content .= $line;
         }
-
         $now = new DateTime();
         $article = new Article(
             Storage::$nextArticleId++,
@@ -669,9 +682,8 @@ class BlogCMS {
             trim($content),
             $this->currentUser,
             $now,
-            $now // updatedAt = createdAt initially
+            $now
         );
-
         $this->chooseCategories($article);
         Storage::$articles[] = $article;
         echo "Article created as draft on {$now->format('Y-m-d H:i:s')}.\n";
@@ -685,7 +697,6 @@ class BlogCMS {
             echo "Not found or permission denied\n";
             return;
         }
-
         echo "New title (Enter to keep): ";
         $title = trim(fgets(STDIN));
         if ($title !== '') $article->setTitle($title);
@@ -701,7 +712,6 @@ class BlogCMS {
             }
             $article->setContent(trim($content));
         }
-
         echo "Article updated on " . $article->getUpdatedAt()->format('Y-m-d H:i:s') . ".\n";
     }
 
@@ -713,7 +723,6 @@ class BlogCMS {
             echo "Not found or permission denied\n";
             return;
         }
-
         if ($article->publish()) {
             echo "Article published on " . $article->getPublishedAt()->format('Y-m-d H:i:s') . "!\n";
         } else {
@@ -729,10 +738,8 @@ class BlogCMS {
             echo "Article not found or not published.\n";
             return;
         }
-
         echo "Your comment: ";
         $content = trim(fgets(STDIN));
-
         $article->addComment(new Comment(
             Storage::$nextCommentId++,
             $content,
@@ -750,7 +757,6 @@ class BlogCMS {
             echo "0. Back\n> ";
             $ch = trim(fgets(STDIN));
             if ($ch === '0') break;
-
             if ($ch === '1') {
                 echo "Name: ";
                 $name = trim(fgets(STDIN));
@@ -762,7 +768,7 @@ class BlogCMS {
                     $name,
                     $parentId
                 );
-                echo "Category created on " . (new DateTime())->format('Y-m-d H:i:s') . ".\n";
+                echo "Category created.\n";
             }
         }
     }
@@ -777,7 +783,6 @@ class BlogCMS {
         echo "Category IDs (comma-separated, or Enter for none): ";
         $input = trim(fgets(STDIN));
         if ($input === '') return;
-
         $ids = array_map('intval', explode(',', $input));
         foreach (Storage::$categories as $cat) {
             if (in_array($cat->getId(), $ids)) {
@@ -790,7 +795,7 @@ class BlogCMS {
         foreach (Storage::$categories as $cat) {
             if ($cat->getParentId() === $parentId) {
                 $created = $cat->getCreatedAt()->format('Y-m-d');
-                echo str_repeat("  ", $level) . "├─ [{$cat->getId()}] {$cat->getName()} (created: $created)\n";
+                echo str_repeat("  ", $level) . "└─ [{$cat->getId()}] {$cat->getName()} (created: $created)\n";
                 $this->listCategoriesTree($cat->getId(), $level + 1);
             }
         }
@@ -807,6 +812,5 @@ class BlogCMS {
 /* =======================
    START APP
 ======================= */
-
 $app = new BlogCMS();
 $app->run();

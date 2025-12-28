@@ -1,529 +1,812 @@
-<?php 
-    // Static storage arrays to simulate database
-    class Storage {
-        public static array $articles = [];
-        public static array $categories = [];
-        public static array $comments = [];
-        public static array $users = [];
-        public static array $articleCategories = []; // article_id => [category_ids]
-        public static array $articleComments = []; // article_id => [comment_ids]
-        public static array $categoryParents = []; // category_id => parent_id
-        public static ?user $loggedInUser = null;
+<?php
+class Storage {
+    public static array $users = [];
+    public static array $articles = [];
+    public static array $categories = [];
+    public static int $nextUserId = 1;
+    public static int $nextArticleId = 1;
+    public static int $nextCategoryId = 1;
+    public static int $nextCommentId = 1;
+}
+
+abstract class User {
+    public function __construct(
+        protected int $id,
+        protected string $username,
+        protected string $password, 
+        protected string $role,
+        protected DateTime $createdAt,
+        protected ?DateTime $lastLogin = null
+    ) {}
+
+    public function getId(): int { return $this->id; }
+    public function getUsername(): string { return $this->username; }
+    public function getRole(): string { return $this->role; }
+    public function getCreatedAt(): DateTime { return $this->createdAt; }
+    public function getLastLogin(): ?DateTime { return $this->lastLogin; }
+
+    public function setLastLogin(DateTime $date): void {
+        $this->lastLogin = $date;
     }
 
-    class article {
-        private int $id_article;
-        private string $titre;
-        private string $content;
-        private string $excerpt;
-        private string $status;
-        private string $author;
-        private string $createdAtA;
-        private DateTime $publishedAtA;
-        private DateTime $updatedAtA;
-        
-        function __construct($id_article,$titre,$content,$excerpt, $status,$author,$createdAtA,$publishedAtA,$updatedAtA)
-        {
-            $this->id_article = $id_article;
-            $this->titre = $titre;
-            $this->content = $content;
-            $this->excerpt = $excerpt;
-            $this->status = $status;
-            $this->author = $author;
-            $this->createdAtA = $createdAtA;
-            $this->publishedAtA = $publishedAtA;
-            $this->updatedAtA = $updatedAtA;
-        }
-        
-        public function getId() {
-            return $this->id_article;
-        }
-        
-        public function addCategory ($id_categorie){
-            if (!isset(Storage::$articleCategories[$this->id_article])) {
-                Storage::$articleCategories[$this->id_article] = [];
-            }
-            if (!in_array($id_categorie, Storage::$articleCategories[$this->id_article])) {
-                Storage::$articleCategories[$this->id_article][] = $id_categorie;
-                return true;
-            }
+    public function verifyPassword(string $password): bool {
+        return $this->password === $password; 
+    }
+
+    public function canCreateArticle(): bool { return false; }
+    public function canEditArticle(Article $a): bool { return false; }
+    public function canDeleteArticle(Article $a): bool { return false; }
+    public function canManageUsers(): bool { return false; }
+    public function canManageCategories(): bool { return false; }
+    public function canApproveComments(): bool { return false; }
+    public function canAddComment(): bool { return false; }
+}
+
+abstract class Moderator extends User {
+    public function __construct(
+        int $id,
+        string $username,
+        string $password,
+        string $role,
+        DateTime $createdAt,
+        ?DateTime $lastLogin = null
+    ) {
+        parent::__construct($id, $username, $password, $role, $createdAt, $lastLogin);
+    }
+
+    public function canCreateArticle(): bool { return true; }
+    public function canEditArticle(Article $a): bool { return true; }
+    public function canDeleteArticle(Article $a): bool { return true; }
+    public function canManageCategories(): bool { return true; }
+    public function canApproveComments(): bool { return true; }
+    public function canAddComment(): bool { return true; }
+}
+
+class Author extends User {
+    public function __construct(int $id, string $username, string $password, DateTime $createdAt, ?DateTime $lastLogin = null) {
+        parent::__construct($id, $username, $password, 'author', $createdAt, $lastLogin);
+    }
+
+    public function canCreateArticle(): bool { return true; }
+    public function canEditArticle(Article $a): bool { return $a->isOwnedBy($this); }
+    public function canDeleteArticle(Article $a): bool { return $a->isOwnedBy($this); }
+    public function canAddComment(): bool { return true; }
+}
+
+class Editor extends Moderator {
+    public function __construct(
+        int $id, 
+        string $username, 
+        string $password, 
+        protected string $moderatorLevel,
+        DateTime $createdAt, 
+        ?DateTime $lastLogin = null
+    ) {
+        parent::__construct($id, $username, $password, 'editor', $createdAt, $lastLogin);
+    }
+
+    public function getModeratorLevel(): string { return $this->moderatorLevel; }
+}
+
+class Admin extends Moderator {
+    public function __construct(int $id, string $username, string $password, DateTime $createdAt, ?DateTime $lastLogin = null) {
+        parent::__construct($id, $username, $password, 'admin', $createdAt, $lastLogin);
+    }
+
+    public function canManageUsers(): bool { return true; }
+}
+
+class Category {
+    public function __construct(
+        private int $id,
+        private string $name,
+        private ?int $parentId = null,
+        private DateTime $createdAt = new DateTime()
+    ) {}
+
+    public function getId(): int { return $this->id; }
+    public function getName(): string { return $this->name; }
+    public function getParentId(): ?int { return $this->parentId; }
+    public function getCreatedAt(): DateTime { return $this->createdAt; }
+}
+
+class Comment {
+    private bool $approved = false;
+
+    public function __construct(
+        private int $id,
+        private string $content,
+        private User $author,
+        private DateTime $createdAt
+    ) {}
+
+    public function getId(): int { return $this->id; }
+    public function getContent(): string { return $this->content; }
+    public function getAuthor(): User { return $this->author; }
+    public function getCreatedAt(): DateTime { return $this->createdAt; }
+    public function isApproved(): bool { return $this->approved; }
+    public function approve(): void { $this->approved = true; }
+
+    public function display(): void {
+        $status = $this->approved ? '[Approved]' : '[Pending]';
+        echo "   - {$status} {$this->author->getUsername()}: {$this->content}\n";
+    }
+}
+
+class Article {
+    private array $comments = [];
+    private array $categories = [];
+    private string $status = 'draft';
+
+    public function __construct(
+        private int $id,
+        private string $title,
+        private string $content,
+        private User $author,
+        private DateTime $createdAt,
+        private ?DateTime $updatedAt = null,
+        private ?DateTime $publishedAt = null
+    ) {
+        $this->updatedAt = $updatedAt ?? $createdAt; // initially same as created
+    }
+
+    public function getId(): int { return $this->id; }
+    public function getTitle(): string { return $this->title; }
+    public function setTitle(string $title): void { 
+        $this->title = $title; 
+        $this->touchUpdatedAt();
+    }
+    public function getContent(): string { return $this->content; }
+    public function setContent(string $content): void { 
+        $this->content = $content; 
+        $this->touchUpdatedAt();
+    }
+    public function getAuthor(): User { return $this->author; }
+    public function getStatus(): string { return $this->status; }
+    public function getCreatedAt(): DateTime { return $this->createdAt; }
+    public function getUpdatedAt(): DateTime { return $this->updatedAt ?? $this->createdAt; }
+    public function getPublishedAt(): ?DateTime { return $this->publishedAt; }
+
+    private function touchUpdatedAt(): void {
+        $this->updatedAt = new DateTime();
+    }
+
+    public function isOwnedBy(User $u): bool {
+        return $this->author->getId() === $u->getId();
+    }
+
+    public function addCategory(Category $c): void {
+        $this->categories[$c->getId()] = $c;
+    }
+
+    public function getCategories(): array { return array_values($this->categories); }
+
+    public function publish(): bool {
+        if (empty($this->categories)) {
             return false;
         }
-        
-        public function removeCategorie($id_categorie){
-            if (isset(Storage::$articleCategories[$this->id_article])) {
-                $key = array_search($id_categorie, Storage::$articleCategories[$this->id_article]);
-                if ($key !== false) {
-                    unset(Storage::$articleCategories[$this->id_article][$key]);
-                    Storage::$articleCategories[$this->id_article] = array_values(Storage::$articleCategories[$this->id_article]);
-                    return true;
-                }
-            }
-            return false;
-        }
-        
-        public function addComment($comment){
-            if (!isset(Storage::$articleComments[$this->id_article])) {
-                Storage::$articleComments[$this->id_article] = [];
-            }
-            $commentId = $comment->getId();
-            if (!in_array($commentId, Storage::$articleComments[$this->id_article])) {
-                Storage::$articleComments[$this->id_article][] = $commentId;
-                return true;
-            }
-            return false;
-        }
-        
-        public function getComments(){
-            $comments = [];
-            if (isset(Storage::$articleComments[$this->id_article])) {
-                foreach (Storage::$articleComments[$this->id_article] as $commentId) {
-                    foreach (Storage::$comments as $comment) {
-                        if ($comment->getId() === $commentId) {
-                            $comments[] = $comment;
-                        }
-                    }
-                }
-            }
-            return $comments;
-        }
-    }
-    class comment {
-        private int $id_comment ;
-        private string $content;
-        private DateTime $dateC;
-        private bool $approved = false;
-        
-        function __construct($id_comment,$content,$dateC)
-        {
-            $this->id_comment = $id_comment;
-            $this->content = $content;
-            $this->dateC = $dateC;
-        }
-        
-        public function getId() {
-            return $this->id_comment;
-        }
-        
-        public function getContent() {
-            return $this->content;
-        }
-        
-        public function approve() {
-            $this->approved = true;
-        }
-        
-        public function isApproved() {
-            return $this->approved;
-        }
-    }
-    class categorie {
-        private int $id_categorie;
-        private string $nameCa;
-        private string $description;
-        private DateTime $dateCA;
-        
-        function __construct($id_categorie, $nameCa ,$description ,$dateCA)
-        {
-            $this->id_categorie = $id_categorie;
-            $this->nameCa = $nameCa;
-            $this->description = $description;
-            $this->dateCA = $dateCA;
-        }
-        
-        public function getId() {
-            return $this->id_categorie;
-        }
-        
-        public function getName() {
-            return $this->nameCa;
-        }
-        
-        public function setParent($parentId) {
-            Storage::$categoryParents[$this->id_categorie] = $parentId;
-        }
-        
-        public function getParent(){
-            if (isset(Storage::$categoryParents[$this->id_categorie])) {
-                $parentId = Storage::$categoryParents[$this->id_categorie];
-                foreach (Storage::$categories as $category) {
-                    if ($category->getId() === $parentId) {
-                        return $category;
-                    }
-                }
-            }
-            return null;
-        }
-        
-        public function getTree(){
-            $tree = [$this];
-            $children = [];
-            foreach (Storage::$categoryParents as $childId => $parentId) {
-                if ($parentId === $this->id_categorie) {
-                    foreach (Storage::$categories as $category) {
-                        if ($category->getId() === $childId) {
-                            $children[] = $category;
-                            $tree = array_merge($tree, $category->getTree());
-                        }
-                    }
-                }
-            }
-            return $tree;
-        }
-    }
-class user {
-    protected int $id_user;
-    protected string $username;
-    protected string $email;
-    protected string $password;
-    protected DateTime $createdAT; 
-    protected DateTime $lastLogin;
-    
-    function __construct($id_user , $username , $email , $password , $createdAT , $lastLogin)
-    {
-        $this->id_user = $id_user;
-        $this->username = $username;
-        $this->email = $email;
-        $this->password  = $password;
-        $this->createdAT = $createdAT;
-        $this->lastLogin = $lastLogin;
-    }
-    
-    public function getId() {
-        return $this->id_user;
-    }
-    
-    public function getUsername() {
-        return $this->username;
-    }
-    
-    public function getEmail() {
-        return $this->email;
-    }
-    
-    public function login($email , $password){
-        if ($this->email === $email && $this->password === $password) {
-            Storage::$loggedInUser = $this;
-            $this->lastLogin = new DateTime();
-            return true;
-        }
-        return false;
-    }
-    
-    public function logout(){
-        Storage::$loggedInUser = null;
+        $this->status = 'published';
+        $this->publishedAt = new DateTime();
+        $this->touchUpdatedAt(); // publishing counts as update
         return true;
     }
-}
-class moderateur extends user {
-    public function approvComment($id_comment){
-        foreach (Storage::$comments as $comment) {
-            if ($comment->getId() === $id_comment) {
-                $comment->approve();
-                return true;
-            }
-        }
-        return false;
+
+    public function isPublished(): bool {
+        return $this->status === 'published';
     }
-    
-    public function deleteCommnet($id_comment){
-        foreach (Storage::$comments as $key => $comment) {
-            if ($comment->getId() === $id_comment) {
-                unset(Storage::$comments[$key]);
-                Storage::$comments = array_values(Storage::$comments);
-                // Remove from article comments
-                foreach (Storage::$articleComments as $articleId => $commentIds) {
-                    $index = array_search($id_comment, $commentIds);
-                    if ($index !== false) {
-                        unset(Storage::$articleComments[$articleId][$index]);
-                        Storage::$articleComments[$articleId] = array_values(Storage::$articleComments[$articleId]);
-                    }
-                }
-                return true;
-            }
-        }
-        return false;
+
+    public function addComment(Comment $c): void {
+        $this->comments[] = $c;
     }
-    
-    public function createCategory($nameCa, $description = ""){
-        $newId = count(Storage::$categories) + 1;
-        $category = new categorie($newId, $nameCa, $description, new DateTime());
-        Storage::$categories[] = $category;
-        return $category;
-    } 
-    
-    public function deleteCategorie($id_categorie){
-        foreach (Storage::$categories as $key => $category) {
-            if ($category->getId() === $id_categorie) {
-                unset(Storage::$categories[$key]);
-                Storage::$categories = array_values(Storage::$categories);
-                // Remove from article categories
-                foreach (Storage::$articleCategories as $articleId => $categoryIds) {
-                    $index = array_search($id_categorie, $categoryIds);
-                    if ($index !== false) {
-                        unset(Storage::$articleCategories[$articleId][$index]);
-                        Storage::$articleCategories[$articleId] = array_values(Storage::$articleCategories[$articleId]);
-                    }
-                }
-                // Remove parent relationship
-                if (isset(Storage::$categoryParents[$id_categorie])) {
-                    unset(Storage::$categoryParents[$id_categorie]);
-                }
-                return true;
-            }
-        }
-        return false;
+
+    public function getComments(): array { return $this->comments; }
+
+    public function getApprovedComments(): array {
+        return array_filter($this->comments, fn($c) => $c->isApproved());
     }
-    
-    public function publishArticle($id_article){
-        foreach (Storage::$articles as $article) {
-            if ($article->getId() === $id_article) {
-                // Using reflection to update private status property
-                $reflection = new ReflectionClass($article);
-                $property = $reflection->getProperty('status');
-                $property->setAccessible(true);
-                $property->setValue($article, 'published');
-                return true;
-            }
-        }
-        return false;
-    }
-    
-    public function deleteAnyArticle($id_article){
-        foreach (Storage::$articles as $key => $article) {
-            if ($article->getId() === $id_article) {
-                unset(Storage::$articles[$key]);
-                Storage::$articles = array_values(Storage::$articles);
-                // Remove associated categories and comments
-                if (isset(Storage::$articleCategories[$id_article])) {
-                    unset(Storage::$articleCategories[$id_article]);
+
+    public function display(bool $full = false): void {
+        $catNames = array_map(fn($c) => $c->getName(), $this->getCategories());
+        $cats = $catNames ? implode(', ', $catNames) : 'Aucune';
+        $status = $this->isPublished() ? 'published' : 'draft';
+
+        $created = $this->createdAt->format('Y-m-d H:i');
+        $updated = $this->getUpdatedAt()->format('Y-m-d H:i');
+        $published = $this->publishedAt ? $this->publishedAt->format('Y-m-d H:i') : '—';
+
+        echo "[{$this->id}] {$this->title} ($status) by {$this->author->getUsername()} | Cats: {$cats}\n";
+        echo "     Created: $created | Updated: $updated | Published: $published\n";
+
+        if ($full && $this->isPublished()) {
+            echo str_repeat("-", 70) . "\n";
+            echo $this->content . "\n";
+            echo str_repeat("-", 70) . "\n";
+            echo "Commentaires:\n";
+            if (empty($this->getApprovedComments())) {
+                echo "   Aucun commentaire approuvé.\n";
+            } else {
+                foreach ($this->getApprovedComments() as $comment) {
+                    $comment->display();
                 }
-                if (isset(Storage::$articleComments[$id_article])) {
-                    unset(Storage::$articleComments[$id_article]);
-                }
-                return true;
             }
+        } elseif ($full) {
+            echo "   (Article non publié - contenu visible uniquement pour les membres)\n";
         }
-        return false;
     }
 }
-class author extends user {
-    private string $bio;
-    
-    function __construct($id_user, $username, $email, $password, $createdAT, $lastLogin, $bio){
-        parent::__construct($id_user, $username, $email, $password, $createdAT, $lastLogin);
-        $this->bio = $bio;
+
+class BlogCMS {
+    private ?User $currentUser = null;
+
+    public function __construct() {
+        $this->seed();
     }
-    
-    public function createArticle($titre, $content, $excerpt = ""){
-        $newId = count(Storage::$articles) + 1;
+
+    private function seed(): void {
         $now = new DateTime();
-        $article = new article(
-            $newId,
-            $titre,
-            $content,
-            $excerpt,
-            'draft',
-            $this->username,
-            $now->format('Y-m-d H:i:s'),
-            $now,
+        Storage::$users[] = new Admin(Storage::$nextUserId++, 'admin', 'admin123', $now);
+        Storage::$users[] = new Author(Storage::$nextUserId++, 'yahya', '1234', $now);
+        Storage::$users[] = new Editor(Storage::$nextUserId++, 'editor1', 'edit123', 'senior', $now);
+
+        Storage::$categories[] = new Category(Storage::$nextCategoryId++, 'Tech');
+        Storage::$categories[] = new Category(Storage::$nextCategoryId++, 'Programming', Storage::$categories[0]->getId());
+        Storage::$categories[] = new Category(Storage::$nextCategoryId++, 'Life');
+
+        $article = new Article(
+            Storage::$nextArticleId++,
+            'Welcome to Our Blog!',
+            "This is the first published article. Feel free to read and comment!",
+            Storage::$users[0],
+            new DateTime()
+        );
+        $article->addCategory(Storage::$categories[0]);
+        $article->publish();
+        Storage::$articles[] = $article;
+    }
+
+    public function run(): void {
+        while (true) {
+            if (!$this->currentUser) {
+                $this->showVisitorMenu();
+            } else {
+                $this->showAuthenticatedMenu();
+            }
+
+            $choice = trim(fgets(STDIN));
+
+            if (!$this->currentUser) {
+                $this->handleVisitorChoice($choice);
+            } else {
+                $this->handleAuthenticatedChoice($choice);
+            }
+        }
+    }
+
+    private function showVisitorMenu(): void {
+        echo "\n=== WELCOME TO BLOGCMS (Visitor) ===\n";
+        echo "1. View published articles\n";
+        echo "2. View full article\n";
+        echo "3. Sign up\n";
+        echo "4. Log in\n";
+        echo "0. Exit\n> ";
+    }
+
+    private function showAuthenticatedMenu(): void {
+        $role = $this->currentUser->getRole();
+        $username = $this->currentUser->getUsername();
+        echo "\n=== BLOGCMS MENU ($role: $username) ===\n";
+        echo "1. View all articles (incl. drafts)\n";
+        echo "2. View full article\n";
+
+        if ($this->currentUser->canCreateArticle()) {
+            echo "3. Create article\n";
+            echo "4. Edit article\n";
+            echo "5. Publish article\n";
+        }
+
+        if ($this->currentUser->canAddComment()) {
+            echo "6. Add comment (on published articles)\n";
+        }
+
+        if ($this->currentUser->canApproveComments()) {
+            echo "7. Approve comments\n";
+        }
+
+        if ($this->currentUser->canManageCategories()) {
+            echo "8. Manage categories\n";
+        }
+
+        echo "9. Delete article\n";
+
+        if ($this->currentUser->canManageUsers()) {
+            echo "10. Manage users\n";
+            echo "11. Change user role\n";
+        }
+
+        echo "0. Log out\n> ";
+    }
+
+    private function handleVisitorChoice(string $choice): void {
+        match ($choice) {
+            '1' => $this->listPublishedArticles(),
+            '2' => $this->viewArticleAsVisitor(),
+            '3' => $this->signup(),
+            '4' => $this->login(),
+            '0' => exit("Goodbye! \n"),
+        };
+    }
+
+    private function handleAuthenticatedChoice(string $choice): void {
+        $canApprove = $this->currentUser->canApproveComments();
+        $canManageCats = $this->currentUser->canManageCategories();
+        $canManageUsers = $this->currentUser->canManageUsers();
+
+        match ($choice) {
+            '1' => $this->listArticles(),
+            '2' => $this->viewArticle(),
+            '3' => $this->currentUser->canCreateArticle() ? $this->createArticle() : $this->invalid(),
+            '4' => $this->currentUser->canCreateArticle() ? $this->editArticle() : $this->invalid(),
+            '5' => $this->currentUser->canCreateArticle() ? $this->publishArticle() : $this->invalid(),
+            '6' => $this->currentUser->canAddComment() ? $this->addComment() : $this->invalid(),
+            '7' => $canApprove ? $this->approveComments() : $this->invalid(),
+            '8' => $canManageCats ? $this->manageCategories() : $this->invalid(),
+            '9' => $this->deleteArticle(),
+            '10' => $canManageUsers ? $this->manageUsers() : $this->invalid(),
+            '11' => $canManageUsers ? $this->changeUserRole() : $this->invalid(),
+            '0' => $this->logout(),
+        };
+    }
+
+    private function invalid(): void {
+        echo "Invalid option or insufficient permissions.\n";
+    }
+
+    private function approveComments(): void {
+        echo "\n--- APPROVE COMMENTS ---\n";
+        $pending = [];
+        foreach (Storage::$articles as $article) {
+            if (!$article->isPublished()) continue;
+            foreach ($article->getComments() as $comment) {
+                if (!$comment->isApproved()) {
+                    $pending[] = ['article' => $article, 'comment' => $comment];
+                }
+            }
+        }
+
+        if (empty($pending)) {
+            echo "No pending comments.\n";
+            return;
+        }
+
+        foreach ($pending as $i => $item) {
+            echo "[{$i}] Article [{$item['article']->getId()}] {$item['article']->getTitle()}\n";
+            $item['comment']->display();
+        }
+
+        echo "\nComment index to approve (or Enter to cancel): ";
+        $idx = trim(fgets(STDIN));
+        if ($idx === '' || !isset($pending[$idx])) {
+            echo "Cancelled.\n";
+            return;
+        }
+
+        $pending[$idx]['comment']->approve();
+        echo "Comment approved!\n";
+    }
+
+    private function deleteArticle(): void {
+        echo "Article ID to delete: ";
+        $id = (int)trim(fgets(STDIN));
+        $article = $this->findArticle($id);
+        if (!$article) {
+            echo "Article not found.\n";
+            return;
+        }
+
+        if (!$this->currentUser->canDeleteArticle($article)) {
+            echo "Permission denied. You can only delete your own articles.\n";
+            return;
+        }
+
+        foreach (Storage::$articles as $k => $a) {
+            if ($a->getId() === $id) {
+                unset(Storage::$articles[$k]);
+                Storage::$articles = array_values(Storage::$articles);
+                echo "Article deleted.\n";
+                return;
+            }
+        }
+    }
+
+    private function manageUsers(): void {
+        while (true) {
+            echo "\n--- MANAGE USERS ---\n";
+            foreach (Storage::$users as $u) {
+                $created = $u->getCreatedAt()->format('Y-m-d H:i:s');
+                $last = $u->getLastLogin() ? $u->getLastLogin()->format('Y-m-d H:i:s') : 'Never';
+                $extra = ($u instanceof Editor) ? " | Level: {$u->getModeratorLevel()}" : '';
+                echo "[{$u->getId()}] {$u->getUsername()} ({$u->getRole()})$extra | Created: $created | Last login: $last\n";
+            }
+            echo "1. Create user\n";
+            echo "2. Delete user\n";
+            echo "0. Back\n> ";
+            $ch = trim(fgets(STDIN));
+            if ($ch === '0') break;
+
+            if ($ch === '1') {
+                $this->createUserViaAdmin();
+            } elseif ($ch === '2') {
+                $this->deleteUser();
+            }
+        }
+    }
+
+    private function createUserViaAdmin(): void {
+        echo "Username: "; $un = trim(fgets(STDIN));
+        echo "Password: "; $pw = trim(fgets(STDIN));
+        echo "Role (author/editor/admin): "; $role = strtolower(trim(fgets(STDIN)));
+
+        $now = new DateTime();
+        if ($role === 'editor') {
+            echo "Moderator level (e.g., junior/senior): ";
+            $level = trim(fgets(STDIN));
+            Storage::$users[] = new Editor(Storage::$nextUserId++, $un, $pw, $level, $now);
+        } elseif ($role === 'author') {
+            Storage::$users[] = new Author(Storage::$nextUserId++, $un, $pw, $now);
+        } elseif ($role === 'admin') {
+            Storage::$users[] = new Admin(Storage::$nextUserId++, $un, $pw, $now);
+        } else {
+            echo "Invalid role.\n";
+            return;
+        }
+        echo "User created successfully.\n";
+    }
+
+    private function deleteUser(): void {
+        echo "User ID to delete: ";
+        $userId = (int)trim(fgets(STDIN));
+
+        $targetIndex = null;
+        foreach (Storage::$users as $i => $u) {
+            if ($u->getId() === $userId) {
+                if ($u->getId() === $this->currentUser->getId()) {
+                    echo "You cannot delete yourself.\n";
+                    return;
+                }
+                $targetIndex = $i;
+                break;
+            }
+        }
+
+        if ($targetIndex === null) {
+            echo "User not found.\n";
+            return;
+        }
+
+        $targetUser = Storage::$users[$targetIndex];
+
+        if ($targetUser instanceof Author) {
+            Storage::$articles = array_filter(Storage::$articles, fn($a) => !$a->isOwnedBy($targetUser));
+            Storage::$articles = array_values(Storage::$articles);
+            echo "All articles by this author have been deleted.\n";
+        }
+
+        unset(Storage::$users[$targetIndex]);
+        Storage::$users = array_values(Storage::$users);
+        echo "User deleted successfully.\n";
+    }
+
+    private function changeUserRole(): void {
+        echo "\n--- CHANGE USER ROLE ---\n";
+        foreach (Storage::$users as $u) {
+            $created = $u->getCreatedAt()->format('Y-m-d H:i:s');
+            $last = $u->getLastLogin() ? $u->getLastLogin()->format('Y-m-d H:i:s') : 'Never';
+            $extra = ($u instanceof Editor) ? " | Level: {$u->getModeratorLevel()}" : '';
+            echo "[{$u->getId()}] {$u->getUsername()} (current: {$u->getRole()})$extra | Created: $created | Last login: $last\n";
+        }
+
+        echo "\nUser ID to modify: ";
+        $userId = (int)trim(fgets(STDIN));
+
+        $targetIndex = null;
+        foreach (Storage::$users as $i => $u) {
+            if ($u->getId() === $userId) {
+                $targetIndex = $i;
+                break;
+            }
+        }
+
+        if ($targetIndex === null) {
+            echo "User not found.\n";
+            return;
+        }
+
+        if (Storage::$users[$targetIndex]->getId() === $this->currentUser->getId()) {
+            echo "You cannot change your own role.\n";
+            return;
+        }
+
+        echo "New role (author/editor/admin): ";
+        $newRole = strtolower(trim(fgets(STDIN)));
+
+        echo "Password for this user: ";
+        $password = trim(fgets(STDIN));
+
+        $oldUser = Storage::$users[$targetIndex];
+
+        $newUser = match ($newRole) {
+            'author' => new Author($oldUser->getId(), $oldUser->getUsername(), $password, $oldUser->getCreatedAt(), $oldUser->getLastLogin()),
+            'admin' => new Admin($oldUser->getId(), $oldUser->getUsername(), $password, $oldUser->getCreatedAt(), $oldUser->getLastLogin()),
+            'editor' => null,
+            default => null
+        };
+
+        if ($newRole === 'editor') {
+            echo "Moderator level (junior/senior): ";
+            $level = trim(fgets(STDIN));
+            $newUser = new Editor($oldUser->getId(), $oldUser->getUsername(), $password, $level, $oldUser->getCreatedAt(), $oldUser->getLastLogin());
+        }
+
+        if (!$newUser) {
+            echo "Invalid role.\n";
+            return;
+        }
+
+        Storage::$users[$targetIndex] = $newUser;
+        echo "Role changed successfully!\n";
+    }
+
+    private function listPublishedArticles(): void {
+        $published = array_filter(Storage::$articles, fn($a) => $a->isPublished());
+        if (empty($published)) {
+            echo "No published articles yet.\n";
+            return;
+        }
+        echo "\n=== PUBLISHED ARTICLES ===\n";
+        foreach ($published as $article) {
+            $article->display();
+        }
+    }
+
+    private function listArticles(): void {
+        if (empty(Storage::$articles)) {
+            echo "No articles.\n";
+            return;
+        }
+        echo "\n=== ALL ARTICLES (incl. drafts) ===\n";
+        foreach (Storage::$articles as $article) {
+            $article->display();
+        }
+    }
+
+    private function viewArticleAsVisitor(): void {
+        echo "Article ID: ";
+        $id = (int)trim(fgets(STDIN));
+        $article = $this->findArticle($id);
+        if (!$article || !$article->isPublished()) {
+            echo "Article not found or not published.\n";
+            return;
+        }
+        $article->display(full: true);
+    }
+
+    private function viewArticle(): void {
+        echo "Article ID: ";
+        $id = (int)trim(fgets(STDIN));
+        $article = $this->findArticle($id);
+        if (!$article) {
+            echo "Article not found\n";
+            return;
+        }
+        $article->display(full: true);
+    }
+
+    private function signup(): void {
+        echo "\n=== SIGN UP ===\n";
+        echo "Username: ";
+        $username = trim(fgets(STDIN));
+
+        foreach (Storage::$users as $user) {
+            if ($user->getUsername() === $username) {
+                echo "Username already taken.\n";
+                return;
+            }
+        }
+
+        echo "Password: ";
+        $password = trim(fgets(STDIN));
+
+        $now = new DateTime();
+        Storage::$users[] = new Author(
+            Storage::$nextUserId++,
+            $username,
+            $password,
             $now
         );
+        echo "Account created on {$now->format('Y-m-d H:i:s')}! You are now an author. Log in to start writing.\n";
+    }
+
+    private function login(): void {
+        echo "\nUsername: ";
+        $u = trim(fgets(STDIN));
+        echo "Password: ";
+        $p = trim(fgets(STDIN));
+
+        $now = new DateTime();
+        foreach (Storage::$users as $user) {
+            if ($user->getUsername() === $u && $user->verifyPassword($p)) {
+                $user->setLastLogin($now);
+                $this->currentUser = $user;
+                $last = $user->getLastLogin()->format('Y-m-d H:i:s');
+                echo "Logged in as {$user->getRole()} ({$user->getUsername()}) | Last login: $last\n";
+                return;
+            }
+        }
+        echo "Invalid credentials\n";
+    }
+
+    private function logout(): void {
+        $this->currentUser = null;
+        echo "Logged out successfully.\n";
+    }
+
+    private function createArticle(): void {
+        echo "\n=== CREATE ARTICLE ===\n";
+        echo "Title: ";
+        $title = trim(fgets(STDIN));
+        echo "Content (type END on a new line to finish):\n";
+        $content = "";
+        while (true) {
+            $line = fgets(STDIN);
+            if (trim($line) === "END") break;
+            $content .= $line;
+        }
+
+        $now = new DateTime();
+        $article = new Article(
+            Storage::$nextArticleId++,
+            $title,
+            trim($content),
+            $this->currentUser,
+            $now,
+            $now // updatedAt = createdAt initially
+        );
+
+        $this->chooseCategories($article);
         Storage::$articles[] = $article;
-        return $article;
+        echo "Article created as draft on {$now->format('Y-m-d H:i:s')}.\n";
     }
-    
-    public function updateOwnArticle($id_article, $titre = null, $content = null, $excerpt = null){
-        foreach (Storage::$articles as $article) {
-            if ($article->getId() === $id_article) {
-                // Check if article belongs to this author
-                $reflection = new ReflectionClass($article);
-                $authorProp = $reflection->getProperty('author');
-                $authorProp->setAccessible(true);
-                if ($authorProp->getValue($article) !== $this->username) {
-                    return false; // Not the owner
-                }
-                
-                // Update fields
-                if ($titre !== null) {
-                    $titreProp = $reflection->getProperty('titre');
-                    $titreProp->setAccessible(true);
-                    $titreProp->setValue($article, $titre);
-                }
-                if ($content !== null) {
-                    $contentProp = $reflection->getProperty('content');
-                    $contentProp->setAccessible(true);
-                    $contentProp->setValue($article, $content);
-                }
-                if ($excerpt !== null) {
-                    $excerptProp = $reflection->getProperty('excerpt');
-                    $excerptProp->setAccessible(true);
-                    $excerptProp->setValue($article, $excerpt);
-                }
-                
-                // Update updatedAt
-                $updatedProp = $reflection->getProperty('updatedAtA');
-                $updatedProp->setAccessible(true);
-                $updatedProp->setValue($article, new DateTime());
-                
-                return true;
+
+    private function editArticle(): void {
+        echo "Article ID to edit: ";
+        $id = (int)trim(fgets(STDIN));
+        $article = $this->findArticle($id);
+        if (!$article || !$this->currentUser->canEditArticle($article)) {
+            echo "Not found or permission denied\n";
+            return;
+        }
+
+        echo "New title (Enter to keep): ";
+        $title = trim(fgets(STDIN));
+        if ($title !== '') $article->setTitle($title);
+
+        echo "Update content? (y/n): ";
+        if (strtolower(trim(fgets(STDIN))) === 'y') {
+            echo "New content (END to finish):\n";
+            $content = "";
+            while (true) {
+                $line = fgets(STDIN);
+                if (trim($line) === "END") break;
+                $content .= $line;
+            }
+            $article->setContent(trim($content));
+        }
+
+        echo "Article updated on " . $article->getUpdatedAt()->format('Y-m-d H:i:s') . ".\n";
+    }
+
+    private function publishArticle(): void {
+        echo "Article ID to publish: ";
+        $id = (int)trim(fgets(STDIN));
+        $article = $this->findArticle($id);
+        if (!$article || !$this->currentUser->canEditArticle($article)) {
+            echo "Not found or permission denied\n";
+            return;
+        }
+
+        if ($article->publish()) {
+            echo "Article published on " . $article->getPublishedAt()->format('Y-m-d H:i:s') . "!\n";
+        } else {
+            echo "Cannot publish: article must have at least one category.\n";
+        }
+    }
+
+    private function addComment(): void {
+        echo "Article ID: ";
+        $id = (int)trim(fgets(STDIN));
+        $article = $this->findArticle($id);
+        if (!$article || !$article->isPublished()) {
+            echo "Article not found or not published.\n";
+            return;
+        }
+
+        echo "Your comment: ";
+        $content = trim(fgets(STDIN));
+
+        $article->addComment(new Comment(
+            Storage::$nextCommentId++,
+            $content,
+            $this->currentUser,
+            new DateTime()
+        ));
+        echo "Comment added (pending approval).\n";
+    }
+
+    private function manageCategories(): void {
+        while (true) {
+            echo "\n--- MANAGE CATEGORIES ---\n";
+            $this->listCategoriesTree();
+            echo "1. Create category\n";
+            echo "0. Back\n> ";
+            $ch = trim(fgets(STDIN));
+            if ($ch === '0') break;
+
+            if ($ch === '1') {
+                echo "Name: ";
+                $name = trim(fgets(STDIN));
+                echo "Parent ID (Enter for none): ";
+                $parent = trim(fgets(STDIN));
+                $parentId = $parent === '' ? null : (int)$parent;
+                Storage::$categories[] = new Category(
+                    Storage::$nextCategoryId++,
+                    $name,
+                    $parentId
+                );
+                echo "Category created on " . (new DateTime())->format('Y-m-d H:i:s') . ".\n";
             }
         }
-        return false;
     }
-    
-    public function deleteOwnArticle($id_article){
-        foreach (Storage::$articles as $key => $article) {
-            if ($article->getId() === $id_article) {
-                // Check if article belongs to this author
-                $reflection = new ReflectionClass($article);
-                $authorProp = $reflection->getProperty('author');
-                $authorProp->setAccessible(true);
-                if ($authorProp->getValue($article) !== $this->username) {
-                    return false; // Not the owner
-                }
-                
-                unset(Storage::$articles[$key]);
-                Storage::$articles = array_values(Storage::$articles);
-                // Remove associated categories and comments
-                if (isset(Storage::$articleCategories[$id_article])) {
-                    unset(Storage::$articleCategories[$id_article]);
-                }
-                if (isset(Storage::$articleComments[$id_article])) {
-                    unset(Storage::$articleComments[$id_article]);
-                }
-                return true;
+
+    private function chooseCategories(Article $article): void {
+        if (empty(Storage::$categories)) {
+            echo "No categories available yet.\n";
+            return;
+        }
+        echo "\nAvailable categories:\n";
+        $this->listCategoriesTree();
+        echo "Category IDs (comma-separated, or Enter for none): ";
+        $input = trim(fgets(STDIN));
+        if ($input === '') return;
+
+        $ids = array_map('intval', explode(',', $input));
+        foreach (Storage::$categories as $cat) {
+            if (in_array($cat->getId(), $ids)) {
+                $article->addCategory($cat);
             }
         }
-        return false;
     }
-    
-    public function getMyArticle(){
-        $myArticles = [];
-        foreach (Storage::$articles as $article) {
-            $reflection = new ReflectionClass($article);
-            $authorProp = $reflection->getProperty('author');
-            $authorProp->setAccessible(true);
-            if ($authorProp->getValue($article) === $this->username) {
-                $myArticles[] = $article;
+
+    private function listCategoriesTree(?int $parentId = null, int $level = 0): void {
+        foreach (Storage::$categories as $cat) {
+            if ($cat->getParentId() === $parentId) {
+                $created = $cat->getCreatedAt()->format('Y-m-d');
+                echo str_repeat("  ", $level) . "├─ [{$cat->getId()}] {$cat->getName()} (created: $created)\n";
+                $this->listCategoriesTree($cat->getId(), $level + 1);
             }
         }
-        return $myArticles;
+    }
+
+    private function findArticle(int $id): ?Article {
+        foreach (Storage::$articles as $a) {
+            if ($a->getId() === $id) return $a;
+        }
+        return null;
     }
 }
-    class admin extends moderateur {
-        private bool $isSuperAdmin;
-        
-        function __construct($id_user, $username, $email, $password, $createdAT, $lastLogin, $isSuperAdmin){
-            parent::__construct($id_user, $username, $email, $password, $createdAT, $lastLogin);
-            $this->isSuperAdmin = $isSuperAdmin;
-        }
-        
-        public function createUser($username, $email, $password, $role = 'user'){
-            $newId = count(Storage::$users) + 1;
-            $now = new DateTime();
-            
-            switch($role) {
-                case 'author':
-                    $user = new author($newId, $username, $email, $password, $now, $now, '');
-                    break;
-                case 'moderator':
-                    $user = new moderateur($newId, $username, $email, $password, $now, $now);
-                    break;
-                case 'admin':
-                    $user = new admin($newId, $username, $email, $password, $now, $now, false);
-                    break;
-                case 'editor':
-                    $user = new editeur($newId, $username, $email, $password, $now, $now, 'standard');
-                    break;
-                default:
-                    $user = new user($newId, $username, $email, $password, $now, $now);
-            }
-            
-            Storage::$users[] = $user;
-            return $user;
-        }
-        
-        public function deleteUser($id_user){
-            if ($id_user === $this->id_user) {
-                return false; // Cannot delete yourself
-            }
-            
-            foreach (Storage::$users as $key => $user) {
-                if ($user->getId() === $id_user) {
-                    unset(Storage::$users[$key]);
-                    Storage::$users = array_values(Storage::$users);
-                    return true;
-                }
-            }
-            return false;
-        }
-        
-        public function updateUserRole($id_user, $newRole){
-            foreach (Storage::$users as $key => $user) {
-                if ($user->getId() === $id_user) {
-                    // Get user data
-                    $username = $user->getUsername();
-                    $email = $user->getEmail();
-                    $reflection = new ReflectionClass($user);
-                    $passwordProp = $reflection->getProperty('password');
-                    $passwordProp->setAccessible(true);
-                    $password = $passwordProp->getValue($user);
-                    
-                    $createdProp = $reflection->getProperty('createdAT');
-                    $createdProp->setAccessible(true);
-                    $createdAT = $createdProp->getValue($user);
-                    
-                    $lastLoginProp = $reflection->getProperty('lastLogin');
-                    $lastLoginProp->setAccessible(true);
-                    $lastLogin = $lastLoginProp->getValue($user);
-                    
-                    // Create new user with new role
-                    unset(Storage::$users[$key]);
-                    Storage::$users = array_values(Storage::$users);
-                    
-                    switch($newRole) {
-                        case 'author':
-                            $newUser = new author($id_user, $username, $email, $password, $createdAT, $lastLogin, '');
-                            break;
-                        case 'moderator':
-                            $newUser = new moderateur($id_user, $username, $email, $password, $createdAT, $lastLogin);
-                            break;
-                        case 'admin':
-                            $newUser = new admin($id_user, $username, $email, $password, $createdAT, $lastLogin, false);
-                            break;
-                        case 'editor':
-                            $newUser = new editeur($id_user, $username, $email, $password, $createdAT, $lastLogin, 'standard');
-                            break;
-                        default:
-                            $newUser = new user($id_user, $username, $email, $password, $createdAT, $lastLogin);
-                    }
-                    
-                    Storage::$users[] = $newUser;
-                    return $newUser;
-                }
-            }
-            return false;
-        }
-        
-        public function listAllUsers(){
-            return Storage::$users;
-        }
-    }
-    class editeur extends moderateur {
-        private string $moderationLevel;
-        
-        function __construct($id_user, $username, $email, $password, $createdAT, $lastLogin, $moderationLevel = 'standard'){
-            parent::__construct($id_user, $username, $email, $password, $createdAT, $lastLogin);
-            $this->moderationLevel = $moderationLevel;
-        }
-        
-        public function getModerationLevel() {
-            return $this->moderationLevel;
-        }
-        
-        public function setModerationLevel($level) {
-            $this->moderationLevel = $level;
-        }
-    }
-?>
+
+/* =======================
+   START APP
+======================= */
+
+$app = new BlogCMS();
+$app->run();
